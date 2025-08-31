@@ -2,56 +2,30 @@
 CBDB Chat Application
 
 Environment Setup:
-For local development, create a .env file in the project root with:
-    OPENAI_API_KEY=your_openai_api_key_here
-    PASSWORD=CBDB
-    NEO4J_URI=bolt://localhost:7687
-    NEO4J_NAME=neo4j
-    NEO4J_PASSWORD=your_neo4j_password
-
-For deployed mode, use Streamlit secrets in .streamlit/secrets.toml:
+Configure your secrets in .streamlit/secrets.toml:
     OPENAI_API_KEY = "your_openai_api_key_here"
+    ASSISTANT_ID = "your_assistant_id_here"
     PASSWORD = "CBDB"
-    NEO4J_URI = "bolt://localhost:7687"
-    NEO4J_NAME = "neo4j"
+    NEO4J_URI = "neo4j+s://your-instance.databases.neo4j.io"
+    NEO4J_USERNAME = "neo4j"
     NEO4J_PASSWORD = "your_neo4j_password"
 """
 
 import openai
 import streamlit as st
-import os
 import time
-from dotenv import load_dotenv
 from neo4j import GraphDatabase
 from cbdb_agents import CBDBAgenticRAG
 
-# Load environment variables from .env file if it exists (for local development)
-load_dotenv()
-
-# Function to get configuration values with fallback
-def get_config_value(key, default=None):
-    """Get configuration value from environment variables first, then Streamlit secrets"""
-    # First try environment variables (for local development)
-    env_value = os.getenv(key)
-    if env_value:
-        return env_value
-    
-    # Fall back to Streamlit secrets (for deployed mode)
-    try:
-        return st.secrets[key]
-    except KeyError:
-        if default is not None:
-            return default
-        raise ValueError(f"Configuration key '{key}' not found in environment variables or Streamlit secrets")
-
-password =  st.sidebar.text_input('Guest User Password is "CBDB"', type='password')
-openai.api_key = get_config_value('OPENAI_API_KEY')
+password = st.sidebar.text_input('Give me password', type='password')
+assistant_id = st.secrets.ASSISTANT_ID
+openai.api_key = st.secrets.OPENAI_API_KEY
 
 # Neo4j Configuration (Read-only mode)
-NEO4J_URI = os.getenv('NEO4J_URI')
-NEO4J_NAME = os.getenv('NEO4J_NAME', 'neo4j')
-NEO4J_PASSWORD = os.getenv('NEO4J_PASSWORD', 'password')
-NEO4J_AUTH = (NEO4J_NAME, NEO4J_PASSWORD)
+NEO4J_URI = st.secrets.NEO4J_URI
+NEO4J_USERNAME = st.secrets.NEO4J_USERNAME
+NEO4J_PASSWORD = st.secrets.NEO4J_PASSWORD
+NEO4J_AUTH = (NEO4J_USERNAME, NEO4J_PASSWORD)
 
 # Initialize Neo4j read-only connection
 @st.cache_resource
@@ -62,13 +36,10 @@ def init_neo4j_driver():
             driver = GraphDatabase.driver(
                 NEO4J_URI, 
                 auth=NEO4J_AUTH,
-                # Configure for read-only access
-                database="neo4j",  # Default database
+                # Configure connection settings
                 max_connection_lifetime=30 * 60,  # 30 minutes
                 max_connection_pool_size=50,
-                connection_acquisition_timeout=30,  # 30 seconds
-                # Ensure read-only operations
-                default_access_mode='READ'
+                connection_acquisition_timeout=30  # 30 seconds
             )
             # Test connection
             driver.verify_connectivity()
@@ -203,7 +174,7 @@ if st.sidebar.button("Exit Chat"):
 if st.session_state.start_chat:
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if password != get_config_value('PASSWORD'):
+    if password != st.secrets.PASSWORD:
         st.info("Wrong password")
         st.stop()
     for message in st.session_state.messages:
