@@ -1,4 +1,12 @@
 streamlit>=1.26.0
 openai
 langchain
+langchain-openai
+langchain-community
+langchain-neo4j
 SPARQLWrapper
+python-dotenv
+neo4j
+numpy
+sentence-transformers
+faiss-cpu

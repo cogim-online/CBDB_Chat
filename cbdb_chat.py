@@ -1,14 +1,127 @@
+"""
+CBDB Chat Application
+
+Environment Setup:
+For local development, create a .env file in the project root with:
+    OPENAI_API_KEY=your_openai_api_key_here
+    PASSWORD=CBDB
+    NEO4J_URI=bolt://localhost:7687
+    NEO4J_NAME=neo4j
+    NEO4J_PASSWORD=your_neo4j_password
+
+For deployed mode, use Streamlit secrets in .streamlit/secrets.toml:
+    OPENAI_API_KEY = "your_openai_api_key_here"
+    PASSWORD = "CBDB"
+    NEO4J_URI = "bolt://localhost:7687"
+    NEO4J_NAME = "neo4j"
+    NEO4J_PASSWORD = "your_neo4j_password"
+"""
+
 import openai
 import streamlit as st
 import os
 import time
+from dotenv import load_dotenv
+from neo4j import GraphDatabase
+from cbdb_agents import CBDBAgenticRAG
 
-password =  st.sidebar.text_input('Give me password', type='password')
-assistant_id = st.secrets.ASSISTANT_ID
-openai.api_key = st.secrets.OPENAI_API_KEY
+# Load environment variables from .env file if it exists (for local development)
+load_dotenv()
 
-st.title('💬LODox Concept Chat Demo')
-st.caption("LODox Concept Chat powered by OpenAI LLM")
+# Function to get configuration values with fallback
+def get_config_value(key, default=None):
+    """Get configuration value from environment variables first, then Streamlit secrets"""
+    # First try environment variables (for local development)
+    env_value = os.getenv(key)
+    if env_value:
+        return env_value
+    
+    # Fall back to Streamlit secrets (for deployed mode)
+    try:
+        return st.secrets[key]
+    except KeyError:
+        if default is not None:
+            return default
+        raise ValueError(f"Configuration key '{key}' not found in environment variables or Streamlit secrets")
+
+password =  st.sidebar.text_input('Guest User Password is "CBDB"', type='password')
+openai.api_key = get_config_value('OPENAI_API_KEY')
+
+# Neo4j Configuration (Read-only mode)
+NEO4J_URI = os.getenv('NEO4J_URI')
+NEO4J_NAME = os.getenv('NEO4J_NAME', 'neo4j')
+NEO4J_PASSWORD = os.getenv('NEO4J_PASSWORD', 'password')
+NEO4J_AUTH = (NEO4J_NAME, NEO4J_PASSWORD)
+
+# Initialize Neo4j read-only connection
+@st.cache_resource
+def init_neo4j_driver():
+    """Initialize Neo4j driver with read-only access"""
+    if NEO4J_URI:
+        try:
+            driver = GraphDatabase.driver(
+                NEO4J_URI, 
+                auth=NEO4J_AUTH,
+                # Configure for read-only access
+                database="neo4j",  # Default database
+                max_connection_lifetime=30 * 60,  # 30 minutes
+                max_connection_pool_size=50,
+                connection_acquisition_timeout=30,  # 30 seconds
+                # Ensure read-only operations
+                default_access_mode='READ'
+            )
+            # Test connection
+            driver.verify_connectivity()
+            st.success("✅ Neo4j connection established (Read-only mode)")
+            return driver
+        except Exception as e:
+            st.error(f"❌ Failed to connect to Neo4j: {str(e)}")
+            return None
+    else:
+        st.warning("⚠️ Neo4j URI not configured")
+        return None
+
+# Initialize Neo4j driver
+neo4j_driver = init_neo4j_driver()
+
+# Initialize CBDB Multi-Agent RAG System
+@st.cache_resource
+def init_cbdb_rag_system():
+    """Initialize the CBDB Multi-Agent RAG system"""
+    if neo4j_driver and openai.api_key:
+        try:
+            # Create OpenAI client
+            client = openai.OpenAI(api_key=openai.api_key)
+            
+            # Initialize the multi-agent system
+            cbdb_rag = CBDBAgenticRAG(neo4j_driver, client)
+            st.success("✅ CBDB Multi-Agent RAG System initialized")
+            return cbdb_rag
+        except Exception as e:
+            st.error(f"❌ Failed to initialize CBDB RAG system: {str(e)}")
+            return None
+    else:
+        st.warning("⚠️ Cannot initialize CBDB RAG system - missing Neo4j or OpenAI connection")
+        return None
+
+# Initialize CBDB RAG system
+cbdb_rag_system = init_cbdb_rag_system()
+
+def execute_read_query(query, parameters=None):
+    """Execute a read-only query against Neo4j database"""
+    if not neo4j_driver:
+        return None
+    
+    try:
+        with neo4j_driver.session(default_access_mode='READ') as session:
+            result = session.run(query, parameters or {})
+            return [record.data() for record in result]
+    except Exception as e:
+        st.error(f"Query execution error: {str(e)}")
+        return None
+
+st.title('💬CBDB Chat')
+st.caption("CBDB Chat powered by OpenAI LLM")
 
 # Streamlit UI for sidebar configuration
 st.sidebar.title("Configuration")
@@ -16,101 +129,169 @@ st.sidebar.title("Configuration")
 # Sidebar for selecting the assistant
 assistant_option = st.sidebar.selectbox(
         "Select an Assistant",
-        ("LLaMaC", "building......")
+        ("CBDB Chat", "building......")
     )
 
-client = openai
+# CBDB System Status in Sidebar
+if assistant_option == "CBDB Chat":
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🏛️ CBDB System Status")
+    
+    # Neo4j Status
+    if neo4j_driver:
+        st.sidebar.success("✅ Neo4j Connected")
+        
+        # Try to get database statistics
+        try:
+            stats_query = """
+            MATCH (p:Person) 
+            RETURN count(p) as person_count
+            """
+            result = execute_read_query(stats_query)
+            if result:
+                person_count = result[0].get('person_count', 'Unknown')
+                st.sidebar.info(f"📊 Persons in DB: {person_count:,}")
+        except:
+            st.sidebar.info("📊 Database statistics loading...")
+    else:
+        st.sidebar.error("❌ Neo4j Disconnected")
+    
+    # RAG System Status
+    if cbdb_rag_system:
+        st.sidebar.success("✅ Multi-Agent RAG Active")
+    else:
+        st.sidebar.error("❌ RAG System Inactive")
+    
+    # OpenAI Status
+    if openai.api_key:
+        st.sidebar.success("✅ OpenAI Connected")
+    else:
+        st.sidebar.error("❌ OpenAI Disconnected")
+    
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 💡 Query Tips")
+    st.sidebar.markdown("""
+    - Use specific names for better results
+    - Ask about relationships between people
+    - Specify dynasties or time periods
+    - Try both English and Chinese names
+    """)
+    
+    st.sidebar.markdown("### 🔍 Sample Queries")
+    sample_queries = [
+        "Tell me about Confucius",
+        "Who were Li Bai's friends?",
+        "Tang dynasty emperors",
+        "Who lived in the 10th century?",
+        "Students of Zhu Xi"
+    ]
+    
+    for query in sample_queries:
+        if st.sidebar.button(f"💬 {query}", key=f"sample_{hash(query)}"):
+            st.session_state.sample_query = query
 
 if "start_chat" not in st.session_state:
     st.session_state.start_chat = False
-if "thread_id" not in st.session_state:
-    st.session_state.thread_id = None
 
 if st.sidebar.button("Start Chat"):
     st.session_state.start_chat = True
-    thread = client.beta.threads.create()
-    st.session_state.thread_id = thread.id
 
 if st.sidebar.button("Exit Chat"):
     st.session_state.messages = []  # Clear the chat history
     st.session_state.start_chat = False  # Reset the chat state
-    st.session_state.thread_id = None
 
 if st.session_state.start_chat:
-    if "openai_model" not in st.session_state:
-        st.session_state.openai_model = "gpt-4-turbo-preview"
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if password != st.secrets.PASSWORD:
+    if password != get_config_value('PASSWORD'):
         st.info("Wrong password")
         st.stop()
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Start conversation"):
+    # Handle sample queries
+    if hasattr(st.session_state, 'sample_query'):
+        prompt = st.session_state.sample_query
+        del st.session_state.sample_query
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
-
-        client.beta.threads.messages.create(
-                thread_id=st.session_state.thread_id,
-                role="user",
-                content=prompt
-            )
-        
-        run = client.beta.threads.runs.create(
-            thread_id=st.session_state.thread_id,
-            assistant_id=assistant_id,
-        )
-
-        while run.status != 'completed':
-            time.sleep(1)
-            run = client.beta.threads.runs.retrieve(
-                thread_id=st.session_state.thread_id,
-                run_id=run.id
-            )
-        messages = client.beta.threads.messages.list(
-            thread_id=st.session_state.thread_id
-        )
-
-        # Process and display assistant messages
-        assistant_messages_for_run = [
-            message for message in messages 
-            if message.run_id == run.id and message.role == "assistant"
-        ]
-        for message in assistant_messages_for_run:
-            st.session_state.messages.append({"role": "assistant", "content": message.content[0].text.value})
+    elif prompt := st.chat_input("Ask about Chinese historical figures and their relationships..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+    else:
+        prompt = None
+    
+    if prompt:
+        # Use CBDB Multi-Agent RAG System
+        if cbdb_rag_system:
             with st.chat_message("assistant"):
-                st.markdown(message.content[0].text.value)
+                with st.spinner("Searching CBDB database and analyzing relationships..."):
+                    try:
+                        # Process query through multi-agent system
+                        response = cbdb_rag_system.process_query(prompt)
+                        st.markdown(response)
+                        st.session_state.messages.append({"role": "assistant", "content": response})
+                    except Exception as e:
+                        error_msg = f"Error processing query: {str(e)}"
+                        st.error(error_msg)
+                        st.session_state.messages.append({"role": "assistant", "content": error_msg})
+        else:
+            # Show error if RAG system is not available
+            with st.chat_message("assistant"):
+                error_msg = "❌ CBDB Multi-Agent RAG System is not available. Please check your Neo4j and OpenAI connections."
+                st.error(error_msg)
+                st.session_state.messages.append({"role": "assistant", "content": error_msg})
 
 else:
-    if assistant_option == "LLaMaC": 
+    if assistant_option == "CBDB Chat": 
         st.markdown("""
-                # Welcome to LLaMaC, your Cultural Heritage Knowledge Base Assistant!
+                # Welcome to CBDB Chat - Your Chinese Biographical Database Assistant!
 
-        LLaMaC is designed to assist users in managing cultural heritage information using the CIDOC Conceptual Reference Model (CIDOC-CRM) as its foundation. This system allows users to add, update, delete, and query cultural heritage data in a structured and reliable manner. Follow the guidelines below to interact with LLaMaC effectively:
+        CBDB Chat is powered by a sophisticated multi-agent RAG (Retrieval-Augmented Generation) system designed specifically for exploring the China Biographical Database (CBDB). Our system intelligently queries a comprehensive database of 80,000+ Chinese historical figures and their complex relationships.
 
-        ## Adding Information
-        - To add new cultural heritage information, use the format `ADD[Your Information Here]`. LLaMaC will evaluate the authenticity of the information. If considered genuine, it will be added to the knowledge base.
+        ## What You Can Ask About:
 
-        ## Updating Information
-        - If you need to modify existing information, use `UPDATE[Your Updated Information Here]`. Ensure your updates are accurate and relevant to the cultural heritage data.
+        ### 📚 **Biographical Information**
+        - Basic information about historical figures: *"Tell me about Li Bai"*
+        - Birth/death dates, dynasties, and official positions
+        - Chinese and English names, places of origin
 
-        ## Deleting Information
-        - To remove information from the knowledge base, use `DEL[Specific Information to Delete]`. This action will permanently delete the specified data.
+        ### 🔗 **Relationships & Connections**  
+        - Family relationships: *"Who were Confucius's descendants?"*
+        - Teacher-student relationships: *"Who studied under Zhu Xi?"*
+        - Political and social connections: *"Who served under Emperor Kangxi?"*
+        - Professional relationships and networks
 
-        ## Querying Information
-        - Have a question? Use `Q[Your Question Here]` to receive answers based solely on the stored knowledge base data, without additional explanations or external information.
+        ### 🏛️ **Historical Context**
+        - People from specific dynasties: *"Show me Tang dynasty poets"*
+        - Historical time periods: *"Who lived during 800-900 CE?"*
+        - Regional connections and geographical relationships
 
-        ## Additional Instructions
-        - For any adjustments or specific instructions on how data should be handled, use `CON[Your Instruction Here]`. LLaMaC will adapt its approach to meet these guidelines.
+        ### 🔍 **Complex Queries**
+        - Multi-generational family trees
+        - Social networks and influence patterns
+        - Career trajectories and office progressions
+        - Contemporary figures and their interactions
 
-        ## Handling URLs
-        - When provided with a URL in the format `ADD[URL]`, LLaMaC will retrieve, download, and extract cultural heritage data from the given link, incorporating this information into the knowledge base according to CIDOC-CRM standards.
+        ## How It Works:
 
-        LLaMaC is committed to maintaining a high accuracy level and relies on users to provide genuine cultural heritage information. Your cooperation is essential in building a valuable and trustworthy knowledge base.
+        Our **Multi-Agent System** includes:
+        - **🎯 Smart Router**: Automatically selects the best retrieval method for your question
+        - **🔍 Specialized Retrievers**: Optimized for different types of CBDB queries
+        - **🤖 Text2Cypher**: Converts complex questions into database queries
+        - **✅ Answer Critic**: Ensures comprehensive and accurate responses
+        - **🎨 Response Enhancement**: Uses AI to provide clear, contextual explanations
 
+        ## Example Queries:
+        - *"Who was the teacher of Wang Yangming?"*
+        - *"List Song dynasty officials who served in Hangzhou"*
+        - *"What relationships did Su Shi have with other literati?"*
+        - *"Who lived between 1000-1100 CE and held the position of Prime Minister?"*
+
+        **Start chatting to explore China's rich biographical heritage!**
             """)
     if assistant_option == "building......": 
         st.markdown("""
