@@ -748,7 +748,7 @@ class CBDBResponseSynthesizer:
                 response = self.client.chat.completions.create(
                     model=model_to_use,
                     messages=messages,
-                    max_completion_tokens=1500
+                    # max_completion_tokens=1500
                 )
             except Exception as model_error:
                 st.warning(f"⚠️ Model {model_to_use} failed: {str(model_error)}")
@@ -758,7 +758,7 @@ class CBDBResponseSynthesizer:
                 response = self.client.chat.completions.create(
                     model="gpt-3.5-turbo",
                     messages=messages,
-                    max_tokens=1500  # Note: different parameter name for older models
+                    # max_tokens=1500  # Note: different parameter name for older models
                 )
             
             # Debug the response object

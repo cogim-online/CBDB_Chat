@@ -17,7 +17,7 @@ import time
 from neo4j import GraphDatabase
 from cbdb_agents import CBDBAgenticRAG
 
-password = st.sidebar.text_input('Give me password', type='password')
+password = st.sidebar.text_input('Input the Password: "CBDB"', type='password')
 assistant_id = st.secrets.ASSISTANT_ID
 openai.api_key = st.secrets.OPENAI_API_KEY
 
