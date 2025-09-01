@@ -144,17 +144,14 @@ if assistant_option == "CBDB Chat":
     st.sidebar.markdown("""
     - Use specific names for better results
     - Ask about relationships between people
-    - Specify dynasties or time periods
     - Try both English and Chinese names
     """)
     
     st.sidebar.markdown("### 🔍 Sample Queries")
     sample_queries = [
-        "Tell me about Confucius",
-        "Who were Li Bai's friends?",
-        "Tang dynasty emperors",
-        "Who lived in the 10th century?",
-        "Students of Zhu Xi"
+        "Who was Wang Anshi",
+        "Who Disagreed with views of Qin Gui?",
+       
     ]
     
     for query in sample_queries:
