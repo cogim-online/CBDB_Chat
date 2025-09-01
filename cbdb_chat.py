@@ -150,7 +150,7 @@ if assistant_option == "CBDB Chat":
     st.sidebar.markdown("### 🔍 Sample Queries")
     sample_queries = [
         "Who was Wang Anshi",
-        "Who Disagreed with views of Qin Gui?",
+        "Who was Ouyang Xiu",
        
     ]
     
